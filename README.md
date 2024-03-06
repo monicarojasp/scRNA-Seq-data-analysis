@@ -1,2 +1,2 @@
 # scRNA
-Analyzing single cell RNA
+This are practice files to analyze single cell RNA
