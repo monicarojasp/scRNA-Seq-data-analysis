@@ -1,0 +1,163 @@
+---
+title: "How to read different scRNA-seq formats"
+author: "Monica L. Rojas Pena"
+format: html
+editor: visual
+---
+
+# scRNA-seq Analysis
+
+This is a pipeline to practice scRNA-seq using the Seurat package
+
+## **Reading scRNA-seq data (different formats/objects)**
+
+There are different file formats or objects: feature-barcode sparse matrix similar to a count matrix in bulk-RNA where rows correspond to genes and columns to the cell barcode, the values in this matrix are counts and most of them are 0 (hence the "sparse" word in the name). This are store in different formats as observe in Table 1.
+
++----------------------+--------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| Name                 | Extension    | Description                                                                                                                                                 |
++======================+==============+=============================================================================================================================================================+
+| 10X hdf5             | .hdf5        | Hierarchical Data Format version 5.                                                                                                                         |
++----------------------+--------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| R Data format        | .rds         | R Data Store. Allows you to save a single R object without needing to save the entire workspace.                                                            |
+|                      |              |                                                                                                                                                             |
+|                      |              | It's particularly handy for sharing data or results between R sessions or with others who are using R                                                       |
++----------------------+--------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| AnnData Object       | .h5ad        | Annotated Data. AnnData object is a data structure used in the Python package `anndata`                                                                     |
+|                      |              |                                                                                                                                                             |
+|                      |              | Provides a flexible and efficient way to store and manipulate various types of omics data, including single-cell RNA-seq, single-cell ATAC-seq, and others. |
++----------------------+--------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| Loom                 | .loom        | File format commonly used for storing large-scale omics data.                                                                                               |
+|                      |              |                                                                                                                                                             |
+|                      |              | It is designed to efficiently store and manage multi-dimensional data, such as gene expression profiles from thousands or millions of individual cells.     |
++----------------------+--------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| Text base Market     | .mtx         | .mtx file format is commonly used to store gene expression data in a sparse matrix format.                                                                  |
+|                      |              |                                                                                                                                                             |
+| Enhance Format (MEX) |              |                                                                                                                                                             |
++----------------------+--------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------+
+
+: Table 1. Input file formats/objects scRNA-seq data analysis
+
+We are going to read the different formats into a Seurat Object
+
+```{r}
+#Script to demostrate reading single cell matrices in various formats, converting to seurat object
+#working directory
+setwd("~/Documents/Regresando a ser Computational_Biologist/scRNA/data_sets")
+
+#Install Packages (Seurat, and SeuratDisk)
+remotes::install_github("satijalab/seurat", "seurat5", quiet = TRUE)
+remotes::install_github("mojaveazure/seurat-disk")
+
+#load libraries
+library(Seurat)
+library(SeuratDisk)
+
+```
+
+## .rds file
+
+The `.rds` format is preferred over other formats like `.rda` (used by `save()` and `load()` functions) because it allows you to save a single R object without needing to save the entire workspace.
+
+```{r}
+
+#.RDS format
+rds_obj <- readRDS('ependymal_cells.rds')
+
+str(rds_obj) #to see the object
+#this is complete seurat object (processed data set)
+```
+
+## .hdf5 file CellRanger
+
+The 10X CellRanger software generates output files in the HDF5 file format. These HDF5 files contain various types of data related to single-cell genomics experiments processed using the 10X Genomics platform, such as gene expression matrices, cell barcodes, feature (gene) information, and metadata.
+
+```{r}
+#10X CellRanger .HDF5 format
+hdf5_obj <- Read10X_h5(filename = "20k_PBMC_3p_HT_nextgem_Chromium_X_filtered_feature_bc_matrix.h5",
+           use.names = TRUE,
+           unique.features = TRUE)
+
+#looking at the feature barcode matrix (firts 10 rows and first 10 columns)
+hdf5_obj[1:10,1:10] #columns are cell barcodes, and rows are features 
+
+#To convert to a seurat object:
+seurat_hdf5 <- CreateSeuratObject(counts = hdf5_obj)
+str(seurat_hdf5)
+```
+
+## .mtx file
+
+Each row in the matrix typically represents a gene, each column represents a single cell, and the matrix elements represent the expression level of each gene in each cell.
+
+Here's how the .mtx file format is structured for single-cell gene expression data:
+
+1.  The first line contains three numbers separated by whitespace:
+
+    -   The number of rows (genes).
+
+    -   The number of columns (cells).
+
+    -   The number of non-zero elements in the matrix.
+
+2.  The subsequent lines contain the non-zero elements of the sparse matrix, each represented as follows:
+
+    -   The row index (gene index) of the non-zero element.
+
+    -   The column index (cell index) of the non-zero element.
+
+    -   The value (expression level) of the non-zero element.
+
+```{r}
+#.mtx file dot matrix file
+mtx_obj <- ReadMtx(mtx = "raw_feature_bc_matrix/matrix.mtx.gz",
+        features = "raw_feature_bc_matrix/features.tsv.gz",
+        cells = "raw_feature_bc_matrix/barcodes.tsv.gz")
+
+#looking at the feature barcode matrix (firts 10 rows and first 10 columns)
+mtx_obj[1:10,1:10] #columns are cell barcodes, and rows are features 
+
+#to create a seurat object
+seurat_mtx <- CreateSeuratObject(counts = mtx_obj)
+str(seurat_mtx)
+```
+
+## .loom file
+
+Some key features of the .loom file format include:
+
+1.  **Efficient Storage**: .loom files use a compressed binary format, making them efficient for storing large datasets while minimizing disk space usage.
+
+2.  **Flexibility**: .loom files can store various types of omics data, including single-cell RNA-seq, single-cell ATAC-seq, and others. They can also store additional information such as cell and feature annotations.
+
+3.  **Accessibility**: .loom files can be easily read and manipulated using various programming languages, including Python, R, and others. There are dedicated libraries and packages available for working with .loom files in different programming environments.
+
+4.  **Scalability**: .loom files are designed to scale to very large datasets, making them suitable for storing data from high-throughput experiments with thousands or millions of cells.
+
+5.  **Interoperability**: .loom files are an open-source file format, and there are tools and libraries available for converting data between .loom format and other common formats used in bioinformatics and computational biology.
+
+Overall, .loom files provide a convenient and efficient way to store and analyze large-scale omics data, particularly in the context of single-cell genomics experiments. They are widely used in the scientific community and are supported by many bioinformatics tools and software packages.
+
+```{r}
+#.loo files
+loom_obj <- Connect(filename = "adult-hem-organs-10X-bone-marrow.loom", mode = 'r')
+#it is a different class, and object and different setup than usuall seurat object
+
+#to create a seurat object from loom file
+seurat_loom <- as.Seurat(loom_obj)
+str(seurat_loom)
+```
+
+## .h5ad files
+
+Python libraries such as Scanpy, anndata, and h5py are commonly used for working with 10X Genomics HDF5 files in scRNA-seq analysis. These libraries provide functions and methods for reading, writing, and analyzing HDF5 files containing single-cell data.
+
+```{r}
+# .h5ad format is a format use in skanpy library in python
+# step 1: convert AnnData object to an h5Seurat file
+Convert("adata_SS2_for_download.h5ad", dest = "h5seurat", overwrite = TRUE)
+
+# step 2: Load h5Seurat file into a Seurat object 
+seurat_anndata <- LoadH5Seurat("adata_SS2_for_download.h5seurat")
+
+str(seurat_anndata)
+```
