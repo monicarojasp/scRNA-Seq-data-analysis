@@ -1,2 +1,2 @@
 # scRNA
-This are practice files to analyze scRNA-Seq data analysis uisng R and Python 
+Here I analyse different scRNA-Seq datasets and perform some downstream analysis.
