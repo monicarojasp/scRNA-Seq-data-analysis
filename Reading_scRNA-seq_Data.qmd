@@ -7,7 +7,7 @@ editor: visual
 
 # scRNA-seq Analysis
 
-This is a pipeline to practice scRNA-seq using the Seurat package
+This code demostrates how to read diferent file/object types from scRNA-seq, and how to read them into a Seurat object.
 
 ## **Reading scRNA-seq data (different formats/objects)**
 
@@ -37,7 +37,6 @@ There are different file formats or objects: feature-barcode sparse matrix simil
 
 : Table 1. Input file formats/objects scRNA-seq data analysis
 
-We are going to read the different formats into a Seurat Object
 
 ```{r}
 #Script to demostrate reading single cell matrices in various formats, converting to seurat object
