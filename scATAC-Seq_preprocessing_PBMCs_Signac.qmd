@@ -1,0 +1,186 @@
+---
+title: "Scrip to pre-process Single Cell ATAC-Seq data"
+author: "Monica L. Rojas-Pena"
+format: html
+editor: visual
+---
+
+## scATAC-Seq analysis 
+
+This a pipeline for preprocessing scATAC-Seq data to identify clusters
+
+## Dataset
+
+Single-cell ATAC-Seq (scATAC-Seq) dataset from human peripheral blood mononuclear cells (PBMCs) from 10X genomics.
+
+The goal is to preprocess scATAC-Seq data using the Signac R package
+
+```{r}
+#Vignette: https://stuartlab.org/signac/articles/pbmc_vignette
+#Intall packages
+
+remotes::install_github("stuart-lab/signac", ref="develop")
+install.packages("Matrix", type = "source")
+install.packages("irlba", type = "source")
+bio_pkgs = c("EnsDb.Hsapiens.v75", "biovizBase")
+BiocManager::install(bio_pkgs)
+
+
+
+#libraries
+library(Signac)
+library(Seurat)
+library(EnsDb.Hsapiens.v75)
+library(biovizBase)
+library(tidyverse)
+library(irlba)
+library(Matrix)
+```
+
+The files we will be using for the analysis are:
+
+1.  Fragment file
+2.  Fragment index file (.tbi)
+3.  Raw data
+4.  Metadata
+
+```{r}
+#reading raw data
+counts <- Read10X_h5('atac_v1_pbmc_10k_filtered_peak_bc_matrix.h5')
+counts[1:10, 1:10]
+
+metadata <- read.csv(file = 'atac_v1_pbmc_10k_singlecell.csv', head = T, row.names= 1)
+head(metadata)
+```
+
+Here we can see the regions and rows and each value in the matrix represents the number of Tn5 integration sites for each single barcode. 
+
+```{r}
+#first we have to create an assay object
+chrom_assay <- CreateChromatinAssay(
+  counts = counts,
+  sep = c(":", "-"),
+  fragments = 'atac_v1_pbmc_10k_fragments.tsv.gz',
+  min.cells = 10,
+  min.features = 200
+)
+
+str(chrom_assay)
+
+#creating a Seurat object
+pbmc <- CreateSeuratObject(
+  counts = chrom_assay,
+  assay = "ATAC",
+  meta.data = metadata
+)
+
+str(pbmc)
+
+
+```
+
+Next we add the gene annotation
+
+```{r}
+#adding gene annotations to the seurat object (NULL)
+pbmc@assays$ATAC@annotation
+
+# extract gene annotations from EnsDb
+annotations <- GetGRangesFromEnsDb(ensdb = EnsDb.Hsapiens.v75)
+
+# change to UCSC style since the data was mapped to hg19 (since the chromosomes are missing the chr prefix)
+seqlevels(annotations) <- paste0('chr', seqlevels(annotations))
+
+# add the gene information to the object
+Annotation(pbmc) <- annotations
+pbmc@assays$ATAC@annotation
+```
+
+## Quality control
+
+To asses the quality of the data we need to see at these 5 metrics:
+
+1.  Nucleosome banding pattern/Nucleosome Signal: ratio of mononucleosome fragments over nucleosome-free fragment. Cells with low nucleosome signal, are cells that have an enrichment of fragments that are not bind by nucleosomes.
+
+2.  Transcriptional start site (TSS) enrichment score: The fragments from the nucleosome free regions are expected to be enriched around the TSS, is the regions are from the open region not bind by any nucleosome, the gene in this genes will be actively transcribe or regulated, so it is expected to have an enrichment around the transcription start sides of this genes.
+
+    TSS enrichment score = Fragments centered at TSS over Fragments in TSS-flanking regions. We would like a high value.
+
+3.  Total number of fragments in peaks: Measure of cellular sequencing depth/complexity, low depth reads are removed.
+
+4.  Ratio reads in genomic blacklist regions: Cells with \< 15-20% fragments in peaks are low quality or technical artifacts.
+
+5.  Ratio reads in genomic blacklist regions (encode project): Cell with high proportion of reads mapping to regions associated with artifactual signals.
+
+```{r}
+# compute nucleosome signal score per cell
+pbmc <- NucleosomeSignal(pbmc)
+
+# compute TSS enrichment score per cell
+pbmc <- TSSEnrichment(object = pbmc, fast = FALSE)
+
+# add blacklist ratio and fraction of reads in peaks
+pbmc$blacklist_ratio <- pbmc$blacklist_region_fragments / pbmc$peak_region_fragments
+pbmc$pct_reads_in_peaks <- pbmc$peak_region_fragments / pbmc$passed_filters * 100
+
+View(pbmc@meta.data)
+
+```
+
+Now we visualize the QC results to decide the cut off for further analysis
+
+```{r}
+# Visualizing QC 
+
+#generate an scater plot with the densities 
+colnames(pbmc@meta.data)
+a1 <- DensityScatter(pbmc, x = 'nCount_ATAC', y = 'TSS.enrichment', log_x = TRUE, quantiles = TRUE)
+a2 <- DensityScatter(pbmc, x = 'nucleosome_signal', y = 'TSS.enrichment', log_x = TRUE, quantiles = TRUE)
+
+a1 | a2
+
+VlnPlot(object = pbmc, 
+        features = c('nCount_ATAC', 'nFeature_ATAC', 'TSS.enrichment', 'nucleosome_signal', 'blacklist_ratio', 'pct_reads_in_peaks'),
+        pt.size = 0.1,
+        ncol = 6)
+```
+
+Based on the visualization now we perform a filter of poor quality data, we retain cells with greater than 3000 and less than 30000 counts, having more than 15% reads in the pics, having a blacklist ration less than 0.05, a nuclosome signal less than 4, and a TSS enrichment greater than 3.
+
+```{r}
+# Filtering poor quality cells 
+
+pbmc <- subset(x = pbmc,
+               subset = nCount_ATAC > 3000 &
+                 nCount_ATAC < 30000 &
+                 pct_reads_in_peaks > 15 & 
+                 blacklist_ratio < 0.05 &
+                 nucleosome_signal < 4 &
+                 TSS.enrichment > 3)
+```
+
+After filtering we run the normalization step, this step normalizes based on differences in cellular sequencing depth across the cells, and also across the peaks.
+
+```{r}
+
+
+# Normalization and linear dimensional reduction
+pbmc <- RunTFIDF(pbmc) # normalization
+pbmc <- FindTopFeatures(pbmc, min.cutoff = 'q0') # selecting top features
+pbmc <- RunSVD(pbmc) # dimensionality reduction similar to PCA
+
+DepthCor(pbmc) #correlates sequencing depth with the reduce dimension (first component -technical variation, so we exclude this for following steps)
+```
+
+```{r}
+#Non-linear dimensional reduction and Clustering
+pbmc <- RunUMAP(object = pbmc, reduction = 'lsi', dims = 2:30) #excluding the first component 
+pbmc <- FindNeighbors(object = pbmc, reduction = 'lsi', dims = 2:30)
+pbmc <- FindClusters(object = pbmc, algorithm = 3)
+
+DimPlot(object = pbmc, label = TRUE) + NoLegend()
+```
+
+```{r}
+sessionInfo()
+```
