@@ -1,0 +1,166 @@
+---
+title: "Single Cell Integration using harmony"
+format: html
+editor: visual
+---
+
+## Integrating sin-cell RNA-seq from different conditions using Harmony 
+
+There are different methods to correct for batch effect in scRNA-seq (MNN, Seurat, BBKNN, scVI, Conos, Scmap, Scanorama, scAlign and Harmony), In this analysis I am using Harmony.
+
+Harmony maximizes de diversity of batches in each clusters using an iterative clustering method which ensure that cells in each cluster come from as many batches as possible in each iteration, then it calculates a correction factor per each cell. This repeats and it refines with each iteration until it converges.
+
+Korsunsky et al. 2019 **Fast, sensitive and accurate integration of single-cell data with Harmony** <https://www.nature.com/articles/s41592-019-0619-0>
+
+Note: The output from harmony computes the corrected dimmensionality reduction values, it doesn't calculate the corrected expression values called embedings.
+
+```{r}
+#devtools::install_github('satijalab/seurat-data')
+
+# Setting a seed for reproducibility
+set.seed(42)
+
+# Loading the libraries
+library(harmony) # data integration
+library(Seurat)
+library(SeuratData) # to access the data set
+library(tidyverse) # data manipulation
+library(ggplot2)
+```
+
+## Data set 
+
+The data set use in this analysis correspond to periferal mononuclear cells (PBMCs) from eight Lupus patients split into stimulated and control group, the stimulated group was treated with interferon beta.
+
+The goal of this analysis is to integrate data by conditions overlaying cells that are similar in both conditions.
+
+```{r}
+# getting the data 
+AvailableData() #To check for the available data set
+
+# installing the dataset
+InstallData("ifnb") #we use the name of the data set to install it
+
+# loading dataset
+LoadData("ifnb") 
+str(ifnb)
+```
+
+The data set has 14053 features across 13999 samples.
+
+## Quality control
+
+### Preprocessing
+
+```{r}
+
+#QC
+
+#updating the data set to the most current version of Seurat object
+ifnb = UpdateSeuratObject(object = ifnb) 
+
+#Calculating the mitochondrial percentage per cell
+ifnb$mito.percent <- PercentageFeatureSet(ifnb, pattern = '^MT-')
+
+
+# exploring QC
+#We can see the new column has been creted
+View(ifnb@meta.data)
+
+#Vizualization of this features in the metadata
+VlnPlot(ifnb, features = c("nFeature_RNA", "nCount_RNA", "mito.percent"), ncol = 3)
+
+#Visializing metric togheter
+FeatureScatter(ifnb, feature1 = "nCount_RNA", feature2 = "nFeature_RNA") + geom_smooth(method = 'lm')
+
+# filtering counts with values higher than 800, cells with number of genes greater than 200, and keeping cell with mitochondrial percent less than 5.
+ifnb
+ifnb.filtered <- subset(ifnb, subset = nCount_RNA > 800 &
+                          nFeature_RNA > 200 & 
+                          mito.percent < 5)
+
+```
+
+The cells don't have mitochondrial reads present.
+
+For the scater plot this dataset seems to follow an straight line indications of a good quality data set.
+
+## Standard workflow 
+
+```{r}
+# steps
+#Normalization 
+ifnb.filtered <- NormalizeData(ifnb.filtered)
+
+# fiding variable features
+ifnb.filtered <- FindVariableFeatures(ifnb.filtered)
+
+# scaling the data
+ifnb.filtered <- ScaleData(ifnb.filtered)
+
+# Running linnear dimentionality reduction (PCA)
+ifnb.filtered <- RunPCA(ifnb.filtered)
+
+# Finding the dimentionality of the data visualizing the PCA in a elbow plot
+ElbowPlot(ifnb.filtered)
+
+#Based on the elbow plot we choose the firts 20 PCA's
+ifnb.filtered <- RunUMAP(ifnb.filtered, dims = 1:20, reduction = 'pca')
+
+#grouping by the condition
+before <- DimPlot(ifnb.filtered, reduction = 'umap', group.by = 'stim') #group by condition (stim column)
+before
+```
+
+Based on the elbow plot it seems that the first 15 PCAs explain the dimmentionality of this data, but I will use all 20 PCAs to form a UMAP.
+
+Interpreting the UMAP figure the cells when group by the condition are clearly separating out as per the conditions.
+
+Since these are PBMCs from before and after treatment there should be cells similar in both conditions (both groups). We need to overlay groups similar to each other so we can perform further downstream analysis.
+
+Nest I will use Harmony to integrate these cells and overlay the similar cells
+
+## Running Harmony 
+
+<https://portals.broadinstitute.org/harmony/articles/quickstart.html>
+
+```{r}
+# integrating data - this return the embeddings
+ifnb.harmony <- ifnb.filtered %>%
+  RunHarmony(group.by.vars = 'stim', plot_convergence = FALSE) #group by condition (stim column)
+
+#looking at the results
+ifnb.harmony@reductions
+
+# getting the embeddings
+ifnb.harmony.embed <- Embeddings(ifnb.harmony, "harmony")
+
+#looking at the embedding results
+ifnb.harmony.embed[1:10,1:10]
+```
+
+Now using the embedding values to perform the linear dimmentionality reduction using UMAP.
+
+```{r}
+#  running UMAP and clustering using ** Harmony embeddings instead of PCA **
+ifnb.harmony <- ifnb.harmony %>%
+  RunUMAP(reduction = 'harmony', dims = 1:20) %>%
+  FindNeighbors(reduction = "harmony", dims = 1:20) %>%
+  FindClusters(resolution = 0.5) #finding clusters
+
+# visualizing the results
+after <- DimPlot(ifnb.harmony, reduction = 'umap', group.by = 'stim')
+after
+```
+
+After using harmony the cells from both conditions overlay well over each other and they don't separate out due to the condition. So we can say the integration ran successfully.
+
+```{r}
+# visualizing side by side 
+
+before | after
+```
+
+```{r}
+sessionInfo()
+```
