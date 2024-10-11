@@ -1,2 +1,2 @@
 # scRNA
-Here I analyse different scRNA-Seq datasets and perform preprocessing and downstream analysis.
+Here I analyze different scRNA-Seq datasets and perform preprocessing and downstream analysis.
